@@ -4,7 +4,7 @@ c++：
     new malloc什么区别
         new操作符，自由存储区上动态分配内存空间,返回的是对象类型的指针
             分配失败会抛出bad_alloc的异常，会构造对象，然后将指针给到返回值，字节的计算都是编译器来计算的
-            允许函数的重载 其实是调用 new(size_t),如int *d= new int,其实是调用new(size_of(int))new(size_of(int))
+            允许函数的重载 其实是调用 new(size_t),如int *d= new int,其实是调用new(size_of(int))
         malloc 从堆上动态分配内存 返回的是void*
             失败会但会Null，所以会去检测，显示的指定字节数
             没有重载，没有构造，只是给定一个空间
@@ -12,6 +12,26 @@ c++：
             底层调用操作系统的接口，然后对于linux下面，则是在malloc的时候从当前的结果开始，往后搜寻，直到找到能够容纳整个变量的空间，否则就会去移动内存最后的指针，去申请新的空间
         new的底层实现
             new底层实际是去调用new()函数，该函数的简单数据模式就是去malloc就可以，如果是自定义的类型，那么还会去做的就是去调用构造函数，然后问题是它如果失败了，那么有出错处理，但是malloc就完全没有这方面的操作了
+            EXTEND new, operator new, placement new
+                new:操作符
+                    如上所示，包括分配内存空间，调用构造函数，返回对象类型指针，这是一套完整的流程
+                    其中分配内存空间，就是在operate new这里去做的
+                operate new: 函数
+                    这就是一个单纯分配空间的操作，但是它可以重载(一般是在类中重载)， 返回类型为void*
+                placement new: 函数，看作是operate new的一个重载
+                    主要是把一个已知空间拿来自己用，然后自己执行构造函数，并返回对应地址，但是并不会去申请空间，而是用已有的空间，所以不存在说分配失败的问题
+                    1. 缓冲区提前分配，可以使用堆的空间，也可以使用栈的空间。所以分配方式有如下两种：
+                        class MyClass {…};
+                        char *buf = new char[N * sizeof(MyClass)];
+                        char buf[N * sizeof(MyClass)]; (栈中分配内存？)
+                    2. 对象的构造
+                        MyClass * pClass = new(buf) MyClass; //使用placement new
+                    3. 对象的销毁
+                    一旦这个对象使用完毕，你必须显式的调用类的析构函数进行销毁对象。但此时内存空间不会被释放，以便其他的对象的构造。
+                        pClass->~MyClass();
+                    4. 内存的释放
+                    如果缓冲区在堆中，那么调用delete[] buf 进行内存的释放。如果在栈中，那么在其作用域内有效，跳出作用域，内存自动释放。
+
     static 关键字
         必然引出的问题是静态持续变量, 分三种
             外部的静态持续变量    程序的其他文件中使用，其他文件使用的时候要用extern
@@ -127,7 +147,7 @@ c++：
         EXTEND: 模板类型推断
             给定模板函数，然后直接传递参数，让编译器帮我们推导出T的类型出来，然后函数内就可以声明这个类型了，甚至可以作为返回值
             template<typename T>void f(ParamType param);
-            我们首先区别T和ParamType,这两者是不同的。我们的目的是推导出T的类型，paramtype只是哪来作为我们的参考而已
+            我们首先区别T和ParamType,这两者是不同的。我们的目的是推导出T的类型，paramtype只是拿来作为我们的参考而已
                 三种情况：
                     1、ParamType是引用或者指针类型：
                         parm是引用，ParamType也是引用，那么T肯定是一个忽略了引用状态的类型。
@@ -159,12 +179,41 @@ c++：
                             f(27);
                         这个时候我们的认为T 为int,这也是为了保持param的右值性往下传递了，这也是一种完美转发？
                 特殊情况就是数组和函数，这俩作为param传递进去的时候T的类型
-                    
+                    如果是作为按值传递的话，参数模板会推断为一个指针，因为数组是可以退化为指针的
+                    按引用传递，那么会推断为一个数组类型，并且是固定数组长度的数组类型
+                    同理，对于函数同样的，如果按照值传递，那么传递的是函数指针，否则就是一个函数引用
+            auto:
+                对于auto来说，完全就可以认为是模板类型推断里面的T，所以前面的推导类型和模板函数完全一致
+                但是c++11引入了一种新的特性，统一初始化，就是用{}来初始化各种情况
+                    这个时候变量类型会被初始化为std::initializer_list<T>的类型，即使用{}来初始化的时候都会将大括号里面的内容转为initializer_list类型，然后再赋值或者去调用对应的支持它作为参数的构造函数(自定义的)
+            decltype:
+                本质上的目的是在重复一次表达式或者变量名的确切类型而已
+                注意区别的是 int x = 0; decltype x 和decltype (x) 的区别
+    内存管理
 
-
-
-
-
+    traits:
+        首先是对于迭代器的理解，由于迭代器的++等操作会相对的暴露太多本身容器内部的实现细节，那么把对迭代器的实现交给容器来做反而更好
+        但是当我们只有一个迭代器的时候，我们是无法知道迭代器所指的内容是什么类型的，如std::vector<int> 的迭代器的解引用所指的其实是一个int，但是当换了一个std::vector<char>时，我们不知道，那么需要有一种机制来帮助我们获取到内部的类型，这就是traits.
+        在对trait的使用之前，我们先来看普通条件下我们如何获取一个指针或者引用的类型
+            那么用的是模板函数的函数推导，一个模板参数为I, 一个为T，传入参数的类型为item，*item，那么在此时的函数中，T就是参数类型了
+            但是这只是在内部的函数中可以对参数进行推导，那么如果需要这个类型用到返回值和外部怎么办？（这里是探究的一个迭代器解引用后的类型）
+                我们再回到一个容器上来说，是不是定义或者初始化的时候就能知道类型为T， 那么在类的内部做一个typedef T value_type, 那么其余的函数就可以直接用 typename I::value_type作为返回值了，这样也是一种获取到类型的方式
+                刚才我们都是假设这是一个类，我们才在类的内部声明，但是若只是一个传入的只是一个指针类型怎么办？
+                    萃取机的声明上去支持
+        现在我们需要一个特定的模板函数，不论给到任何迭代器，我们都能直接获取到value_type(包括class类型的和指针类型的迭代器)
+            template <class I> struct iterator_traits{
+                typedef typename I::iterator_category iterator_category;
+                typedef typename I::value_type value_type;
+                typedef typename I::difference_type difference_type;
+                typedef typename I::pointer pointer;
+                typedef typename I::reference reference;
+            }
+            这个时候对于任意的一个迭代器(class类型)来说，只要它包含了前面五个类型定义，就可以用iterator_traits<Iterator>的方式获取到这几个类型
+            但是这个并不支持指针型迭代器，对于指针类型，则用不同参数的模板函数，这也解释了前面的问题
+            template <class I> struct iterator_traits<T*>{
+                typedef typename T value_type;
+            }
+        那么在上述情况下，对于每一个容器内部包含的迭代器，迭代器要求包含着五个类型名称，然后就可以使用一个通用的方法来用这些了。也不用考虑迭代器是指针型的还是class型的，都用迭代器包装一层就可以
 
     include <>,""
         顺序？区别
